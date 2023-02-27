@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, user-scalable=no">
     <link rel="icon" type="image/png" href="assets/images/3dviewer_net_favicon.ico">
 
-    <title>Online 3D Viewer</title>
+    <title>Spritle 3D Viewer</title>
 
     <!-- website libs start -->
     <link rel="stylesheet" type="text/css" href="../libs/pickr.monolith.min.css">
@@ -41,6 +41,14 @@
                 eventLabel : eventLabel,
                 eventParams : eventParams
             });
+            if (eventName === "model_loaded"){
+                let elementId = window.location.href.split('?')[1];
+                if (elementId){
+                    document.querySelector('i[class="icon icon-tree_view"]').parentElement.click();
+                    document.querySelector('div[title="'+elementId+'"] div[class="ov_tree_item_button_container"] div[src="fit"]').click();
+                    document.querySelector('div[title="'+elementId+'"]').nextSibling.querySelector('div[class="ov_tree_item clickable"]').click();
+                }
+            }
         });
     </script>
     <!-- analytics end -->
@@ -59,7 +67,8 @@
         <div class="title">
             <div class="title_left">
                 <a href="index.html">
-                    <svg class="logo_image"><use href="assets/images/3dviewer_net_logo_text.svg#logo"></use></svg>
+<!--                    <svg class="logo_image"><use href="assets/images/3dviewer_net_logo_text.svg#logo"></use></svg>-->
+                    <img src="assets/images/spritle_logo.png" style="height: 40px;" alt="spritle_logo">
                 </a>
             </div>
             <div class="title_right" id="header_buttons"></div>
