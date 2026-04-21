@@ -3,10 +3,15 @@ import { AddDiv, AddDomElement, ShowDomElement, SetDomElementOuterHeight } from 
 import { AddRangeSlider, AddToggle, AddCheckbox } from '../website/utils.js';
 import { CalculatePopupPositionToElementTopLeft } from './dialogs.js';
 import { PopupDialog } from './dialog.js';
-import { Settings, Theme } from './settings.js';
+import { Settings } from './settings.js';
 import { SidebarPanel } from './sidebarpanel.js';
 import { ShadingType } from '../engine/threejs/threeutils.js';
-import { CameraMode } from '../engine/viewer/camera.js';
+import { ProjectionMode } from '../engine/viewer/camera.js';
+import { Loc } from '../engine/core/localization.js';
+
+import * as Pickr from '@simonwep/pickr';
+import '@simonwep/pickr/dist/themes/monolith.min.css';
+import { MaterialSource } from '../engine/main.js';
 
 function AddColorPicker (parentDiv, opacity, defaultColor, predefinedColors, onChange)
 {
@@ -118,7 +123,7 @@ class EnvironmentMapPopup extends PopupDialog
                 });
             }
         } else if (shadingType === ShadingType.Physical) {
-            let isPerspective = (callbacks.getCameraMode () === CameraMode.Perspective);
+            let isPerspective = (callbacks.getProjectionMode () === ProjectionMode.Perspective);
             if (isPerspective) {
                 let checkboxDiv = AddDiv (contentDiv, 'ov_environment_map_checkbox');
                 let backgroundIsEnvMapCheckbox = AddCheckbox (checkboxDiv, 'use_as_background', 'Use as background image', settings.backgroundIsEnvMap, () => {
@@ -190,7 +195,7 @@ class SettingsModelDisplaySection extends SettingsSection
 {
     constructor (parentDiv, settings)
     {
-        super (parentDiv, 'Model Display', settings);
+        super (parentDiv, Loc ('Model Display'), settings);
 
         this.backgroundColorPicker = null;
 
@@ -215,7 +220,7 @@ class SettingsModelDisplaySection extends SettingsSection
 
         let backgroundColorDiv = AddDiv (this.contentDiv, 'ov_sidebar_parameter');
         let backgroundColorInput = AddDiv (backgroundColorDiv, 'ov_color_picker');
-        AddDiv (backgroundColorDiv, null, 'Background Color');
+        AddDiv (backgroundColorDiv, null, Loc ('Background Color'));
         let predefinedBackgroundColors = ['#ffffffff', '#e3e3e3ff', '#c9c9c9ff', '#898989ff', '#5f5f5fff', '#494949ff', '#383838ff', '#0f0f0fff'];
         let defaultBackgroundColor = '#' + RGBAColorToHexString (this.settings.backgroundColor);
         this.backgroundColorPicker = AddColorPicker (backgroundColorInput, true, defaultBackgroundColor, predefinedBackgroundColors, (r, g, b, a) => {
@@ -225,12 +230,12 @@ class SettingsModelDisplaySection extends SettingsSection
 
         this.environmentMapPhongDiv = AddDiv (this.contentDiv, 'ov_sidebar_parameter');
         this.environmentMapPhongInput = AddDiv (this.environmentMapPhongDiv, 'ov_sidebar_image_picker');
-        AddDiv (this.environmentMapPhongDiv, null, 'Background Image');
+        AddDiv (this.environmentMapPhongDiv, null, Loc ('Background Image'));
         this.environmentMapPhongInput.addEventListener ('click', () => {
             this.environmentMapPopup = new EnvironmentMapPopup ();
             this.environmentMapPopup.ShowPopup (this.environmentMapPhongInput, ShadingType.Phong, this.settings, {
-                getCameraMode : () => {
-                    return this.callbacks.getCameraMode ();
+                getProjectionMode : () => {
+                    return this.callbacks.getProjectionMode ();
                 },
                 onEnvironmentMapChanged : () => {
                     this.UpdateEnvironmentMap ();
@@ -241,12 +246,12 @@ class SettingsModelDisplaySection extends SettingsSection
 
         this.environmentMapPbrDiv = AddDiv (this.contentDiv, 'ov_sidebar_parameter');
         this.environmentMapPbrInput = AddDiv (this.environmentMapPbrDiv, 'ov_sidebar_image_picker');
-        AddDiv (this.environmentMapPbrDiv, null, 'Environment');
+        AddDiv (this.environmentMapPbrDiv, null, Loc ('Environment'));
         this.environmentMapPbrInput.addEventListener ('click', () => {
             this.environmentMapPopup = new EnvironmentMapPopup ();
             this.environmentMapPopup.ShowPopup (this.environmentMapPbrInput, ShadingType.Physical, this.settings, {
-                getCameraMode : () => {
-                    return this.callbacks.getCameraMode ();
+                getProjectionMode : () => {
+                    return this.callbacks.getProjectionMode ();
                 },
                 onEnvironmentMapChanged : () => {
                     this.UpdateEnvironmentMap ();
@@ -259,7 +264,7 @@ class SettingsModelDisplaySection extends SettingsSection
 
         let edgeParameterDiv = AddDiv (this.contentDiv, 'ov_sidebar_parameter');
         this.edgeDisplayToggle = AddToggle (edgeParameterDiv, 'ov_sidebar_parameter_toggle');
-        AddDiv (edgeParameterDiv, 'ov_sidebar_parameter_text', 'Show Edges');
+        AddDiv (edgeParameterDiv, 'ov_sidebar_parameter_text', Loc ('Show Edges'));
 
         this.edgeSettingsDiv = AddDiv (this.contentDiv, 'ov_sidebar_settings_padded');
         this.edgeDisplayToggle.OnChange (() => {
@@ -277,11 +282,11 @@ class SettingsModelDisplaySection extends SettingsSection
             this.settings.edgeSettings.edgeColor = new RGBColor (r, g, b);
             this.callbacks.onEdgeColorChange ();
         });
-        AddDiv (edgeColorRow, null, 'Edge Color');
+        AddDiv (edgeColorRow, null, Loc ('Edge Color'));
 
         let thresholdRow = AddDiv (this.edgeSettingsDiv, 'ov_sidebar_settings_row large');
         this.thresholdSlider = AddRangeSlider (thresholdRow, 0, 90);
-        this.thresholdSlider.setAttribute ('title', 'Edge Angle Threshold');
+        this.thresholdSlider.setAttribute ('title', Loc ('Edge Angle Threshold'));
         this.thresholdSliderValue = AddDomElement (thresholdRow, 'span', 'ov_slider_label');
         this.thresholdSlider.addEventListener ('input', () => {
             this.thresholdSliderValue.innerHTML = this.thresholdSlider.value;
@@ -342,7 +347,7 @@ class SettingsModelDisplaySection extends SettingsSection
     {
         let isPhysicallyBased = (this.callbacks.getShadingType () === ShadingType.Physical);
         if (this.environmentMapPhongDiv !== null) {
-            let isPerspective = (this.callbacks.getCameraMode () === CameraMode.Perspective);
+            let isPerspective = (this.callbacks.getProjectionMode () === ProjectionMode.Perspective);
             ShowDomElement (this.environmentMapPhongDiv, !isPhysicallyBased && isPerspective);
         }
         if (this.environmentMapPbrDiv !== null) {
@@ -371,21 +376,34 @@ class SettingsImportParametersSection extends SettingsSection
 {
     constructor (parentDiv, settings)
     {
-        super (parentDiv, 'Import Settings', settings);
+        super (parentDiv, Loc ('Import Settings'), settings);
+        this.defaultColorPickerDiv = null;
+        this.defaultLineColorPickerDiv = null;
         this.defaultColorPicker = null;
+        this.defaultLineColorPicker = null;
     }
 
     Init (callbacks)
     {
-        super.Init (callbacks);
+        function AddDefaultColorPicker (contentDiv, name, defaultColor, onChange)
+        {
+            let colorDiv = AddDiv (contentDiv, 'ov_sidebar_parameter');
+            let colorInput = AddDiv (colorDiv, 'ov_color_picker');
+            AddDiv (colorDiv, null, name);
+            let predefinedDefaultColors = ['#ffffff', '#e3e3e3', '#cc3333', '#fac832', '#4caf50', '#3393bd', '#9b27b0', '#fda4b8'];
+            let defaultColorStr = '#' + RGBColorToHexString (defaultColor);
+            return AddColorPicker (colorInput, false, defaultColorStr, predefinedDefaultColors, onChange);
+        }
 
-        let defaultColorDiv = AddDiv (this.contentDiv, 'ov_sidebar_parameter');
-        let defaultColorInput = AddDiv (defaultColorDiv, 'ov_color_picker');
-        AddDiv (defaultColorDiv, null, 'Default Color');
-        let predefinedDefaultColors = ['#ffffff', '#e3e3e3', '#cc3333', '#fac832', '#4caf50', '#3393bd', '#9b27b0', '#fda4b8'];
-        let defaultColor = '#' + RGBColorToHexString (this.settings.defaultColor);
-        this.defaultColorPicker = AddColorPicker (defaultColorInput, false, defaultColor, predefinedDefaultColors, (r, g, b, a) => {
+        super.Init (callbacks);
+        this.defaultColorPickerDiv = AddDiv (this.contentDiv);
+        this.defaultColorPicker = AddDefaultColorPicker (this.defaultColorPickerDiv, Loc ('Default Color'), this.settings.defaultColor, (r, g, b, a) => {
             this.settings.defaultColor = new RGBColor (r, g, b);
+            this.callbacks.onDefaultColorChanged ();
+        });
+        this.defaultLineColorPickerDiv = AddDiv (this.contentDiv);
+        this.defaultLineColorPicker = AddDefaultColorPicker (this.defaultLineColorPickerDiv, Loc ('Default Line Color'), this.settings.defaultLineColor, (r, g, b, a) => {
+            this.settings.defaultLineColor = new RGBColor (r, g, b);
             this.callbacks.onDefaultColorChanged ();
         });
     }
@@ -395,13 +413,26 @@ class SettingsImportParametersSection extends SettingsSection
         if (this.defaultColorPicker !== null) {
             this.defaultColorPicker.setColor ('#' + RGBColorToHexString (this.settings.defaultColor));
         }
+        if (this.defaultLineColorPicker !== null) {
+            this.defaultLineColorPicker.setColor ('#' + RGBColorToHexString (this.settings.defaultLineColor));
+        }
     }
 
     UpdateVisibility ()
     {
         if (this.contentDiv !== null) {
-            let hasDefaultMaterial = this.callbacks.hasDefaultMaterial ();
-            ShowDomElement (this.contentDiv, hasDefaultMaterial);
+            let defaultMaterials = this.callbacks.getDefaultMaterials ();
+            if (defaultMaterials.length === 0) {
+                ShowDomElement (this.contentDiv, false);
+            } else {
+                let sources = new Set ();
+                for (let material of defaultMaterials) {
+                    sources.add (material.source);
+                }
+                ShowDomElement (this.contentDiv, true);
+                ShowDomElement (this.defaultColorPickerDiv, sources.has (MaterialSource.DefaultFace));
+                ShowDomElement (this.defaultLineColorPickerDiv, sources.has (MaterialSource.DefaultLine));
+            }
         }
     }
 
@@ -410,45 +441,9 @@ class SettingsImportParametersSection extends SettingsSection
         if (this.defaultColorPicker !== null) {
             this.defaultColorPicker.hide ();
         }
-    }
-}
-
-class SettingsAppearanceSection extends SettingsSection
-{
-    constructor (parentDiv, settings)
-    {
-        super (parentDiv, 'Appearance', settings);
-        this.darkModeToggle = null;
-    }
-
-    Init (callbacks)
-    {
-        super.Init (callbacks);
-
-        let darkModeParameterDiv = AddDiv (this.contentDiv, 'ov_sidebar_parameter');
-
-        this.darkModeToggle = AddToggle (darkModeParameterDiv, 'ov_sidebar_parameter_toggle');
-        this.darkModeToggle.OnChange (() => {
-            this.settings.themeId = (this.darkModeToggle.GetStatus () ? Theme.Dark : Theme.Light);
-            this.callbacks.onThemeChanged ();
-        });
-        AddDiv (darkModeParameterDiv, null, 'Dark Mode');
-
-        let isDarkMode = (this.settings.themeId === Theme.Dark);
-        this.darkModeToggle.SetStatus (isDarkMode);
-    }
-
-    Update ()
-    {
-        if (this.darkModeToggle !== null) {
-            let isDarkMode = (this.settings.themeId === Theme.Dark);
-            this.darkModeToggle.SetStatus (isDarkMode);
+        if (this.defaultLineColorPicker !== null) {
+            this.defaultLineColorPicker.hide ();
         }
-    }
-
-    UpdateVisibility ()
-    {
-
     }
 }
 
@@ -462,7 +457,6 @@ export class SidebarSettingsPanel extends SidebarPanel
         this.sectionsDiv = AddDiv (this.contentDiv, 'ov_sidebar_settings_sections ov_thin_scrollbar');
         this.modelDisplaySection = new SettingsModelDisplaySection (this.sectionsDiv, this.settings);
         this.importParametersSection = new SettingsImportParametersSection (this.sectionsDiv, this.settings);
-        this.appearanceSection = new SettingsAppearanceSection (this.sectionsDiv, this.settings);
 
         this.resetToDefaultsButton = AddDiv (this.contentDiv, 'ov_button ov_panel_button outline', 'Reset to Default');
         this.resetToDefaultsButton.addEventListener ('click', () => {
@@ -472,7 +466,7 @@ export class SidebarSettingsPanel extends SidebarPanel
 
     GetName ()
     {
-        return 'Settings';
+        return Loc ('Settings');
     }
 
     HasTitle ()
@@ -489,7 +483,6 @@ export class SidebarSettingsPanel extends SidebarPanel
     {
         this.modelDisplaySection.Clear ();
         this.importParametersSection.Clear ();
-        this.appearanceSection.Clear ();
     }
 
     Init (callbacks)
@@ -500,8 +493,8 @@ export class SidebarSettingsPanel extends SidebarPanel
             getShadingType : () => {
                 return this.callbacks.getShadingType ();
             },
-            getCameraMode : () => {
-                return this.callbacks.getCameraMode ();
+            getProjectionMode : () => {
+                return this.callbacks.getProjectionMode ();
             },
             onEnvironmentMapChanged : () => {
                 this.callbacks.onEnvironmentMapChanged ();
@@ -520,27 +513,19 @@ export class SidebarSettingsPanel extends SidebarPanel
             }
         });
         this.importParametersSection.Init ({
-            hasDefaultMaterial : () => {
-                return this.callbacks.hasDefaultMaterial ();
+            getDefaultMaterials : () => {
+                return this.callbacks.getDefaultMaterials ();
             },
             onDefaultColorChanged : () => {
                 this.callbacks.onDefaultColorChanged ();
             }
         });
-        this.appearanceSection.Init ({
-            onThemeChanged : () => {
-                if (this.settings.themeId === Theme.Light) {
-                    this.settings.backgroundColor = new RGBAColor (255, 255, 255, 255);
-                    this.settings.defaultColor = new RGBColor (200, 200, 200);
-                } else if (this.settings.themeId === Theme.Dark) {
-                    this.settings.backgroundColor = new RGBAColor (42, 43, 46, 255);
-                    this.settings.defaultColor = new RGBColor (200, 200, 200);
-                }
-                this.modelDisplaySection.Update ();
-                this.importParametersSection.Update ();
-                callbacks.onThemeChanged ();
-            }
-        });
+    }
+
+    UpdateControlsStatus ()
+    {
+        this.modelDisplaySection.Update ();
+        this.importParametersSection.Update ();
     }
 
     UpdateControlsVisibility ()
@@ -552,21 +537,17 @@ export class SidebarSettingsPanel extends SidebarPanel
 
     ResetToDefaults ()
     {
-        let defaultSettings = new Settings ();
+        let defaultSettings = new Settings (this.settings.themeId);
 
         this.settings.environmentMapName = defaultSettings.environmentMapName;
         this.settings.backgroundIsEnvMap = defaultSettings.backgroundIsEnvMap;
         this.settings.backgroundColor = defaultSettings.backgroundColor;
+        this.settings.defaultLineColor = defaultSettings.defaultLineColor;
         this.settings.defaultColor = defaultSettings.defaultColor;
         this.settings.edgeSettings = defaultSettings.edgeSettings;
         this.settings.themeId = defaultSettings.themeId;
-
-        this.modelDisplaySection.Update ();
-        this.importParametersSection.Update ();
-        this.appearanceSection.Update ();
-
+        this.UpdateControlsStatus ();
         this.callbacks.onEnvironmentMapChanged ();
-        this.callbacks.onThemeChanged ();
     }
 
     Resize ()

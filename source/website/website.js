@@ -1,14 +1,15 @@
 import { GetFileExtension, TransformFileHostUrls } from '../engine/io/fileutils.js';
 import { InputFilesFromFileObjects, InputFilesFromUrls } from '../engine/import/importerfiles.js';
 import { ImportErrorCode, ImportSettings } from '../engine/import/importer.js';
-import { CameraMode } from '../engine/viewer/camera.js';
+import { NavigationMode, ProjectionMode } from '../engine/viewer/camera.js';
+import { RGBColor } from '../engine/model/color.js';
 import { Viewer } from '../engine/viewer/viewer.js';
 import { AddDiv, AddDomElement, ShowDomElement, SetDomElementOuterHeight, CreateDomElement, GetDomElementOuterWidth } from '../engine/viewer/domutils.js';
 import { CalculatePopupPositionToScreen, ShowListPopup } from './dialogs.js';
 import { HandleEvent } from './eventhandler.js';
 import { HashHandler } from './hashhandler.js';
 import { Navigator, Selection, SelectionType } from './navigator.js';
-import { Settings, Theme } from './settings.js';
+import { CameraSettings, Settings, Theme } from './settings.js';
 import { Sidebar } from './sidebar.js';
 import { ThemeHandler } from './themehandler.js';
 import { ThreeModelLoaderUI } from './threemodelloaderui.js';
@@ -18,16 +19,16 @@ import { ShowSnapshotDialog } from './snapshotdialog.js';
 import { AddSvgIconElement, GetFilesFromDataTransfer, InstallTooltip, IsSmallWidth } from './utils.js';
 import { ShowOpenUrlDialog } from './openurldialog.js';
 import { ShowSharingDialog } from './sharingdialog.js';
-import { HasDefaultMaterial, ReplaceDefaultMaterialColor } from '../engine/model/modelutils.js';
+import { GetDefaultMaterials, ReplaceDefaultMaterialsColor } from '../engine/model/modelutils.js';
 import { Direction } from '../engine/geometry/geometry.js';
 import { CookieGetBoolVal, CookieSetBoolVal } from './cookiehandler.js';
 import { MeasureTool } from './measuretool.js';
 import { CloseAllDialogs } from './dialog.js';
 import { CreateVerticalSplitter } from './splitter.js';
 import { EnumeratePlugins, PluginType } from './pluginregistry.js';
-
-import * as THREE from 'three';
 import { EnvironmentSettings } from '../engine/viewer/shadingmodel.js';
+import { IntersectionMode } from '../engine/viewer/viewermodel.js';
+import { Loc } from '../engine/core/localization.js';
 
 const WebsiteUIState =
 {
@@ -183,7 +184,8 @@ export class Website
     constructor (parameters)
     {
         this.parameters = parameters;
-        this.settings = new Settings ();
+        this.settings = new Settings (Theme.Light);
+        this.cameraSettings = new CameraSettings ();
         this.viewer = new Viewer ();
         this.measureTool = new MeasureTool (this.viewer, this.settings);
         this.hashHandler = new HashHandler ();
@@ -192,7 +194,7 @@ export class Website
         this.sidebar = new Sidebar (this.parameters.sidebarDiv, this.settings);
         this.modelLoaderUI = new ThreeModelLoaderUI ();
         this.themeHandler = new ThemeHandler ();
-        this.highlightColor = new THREE.Color (0x8ec9f0);
+        this.highlightColor = new RGBColor (142, 201, 240);
         this.uiState = WebsiteUIState.Undefined;
         this.layouter = new WebsiteLayouter (this.parameters, this.navigator, this.sidebar, this.viewer, this.measureTool);
         this.model = null;
@@ -201,6 +203,8 @@ export class Website
     Load ()
     {
         this.settings.LoadFromCookies ();
+        this.cameraSettings.LoadFromCookies ();
+
         this.SwitchTheme (this.settings.themeId, false);
         HandleEvent ('theme_on_load', this.settings.themeId === Theme.Light ? 'light' : 'dark');
 
@@ -254,15 +258,18 @@ export class Website
         this.uiState = uiState;
         if (this.uiState === WebsiteUIState.Intro) {
             ShowDomElement (this.parameters.introDiv, true);
+            ShowDomElement (this.parameters.headerDiv, true);
             ShowDomElement (this.parameters.mainDiv, false);
             ShowOnlyOnModelElements (false);
         } else if (this.uiState === WebsiteUIState.Model) {
             ShowDomElement (this.parameters.introDiv, false);
+            ShowDomElement (this.parameters.headerDiv, true);
             ShowDomElement (this.parameters.mainDiv, true);
             ShowOnlyOnModelElements (true);
             this.UpdatePanelsVisibility ();
         } else if (this.uiState === WebsiteUIState.Loading) {
             ShowDomElement (this.parameters.introDiv, false);
+            ShowDomElement (this.parameters.headerDiv, true);
             ShowDomElement (this.parameters.mainDiv, false);
             ShowOnlyOnModelElements (false);
         }
@@ -307,11 +314,11 @@ export class Website
             return;
         }
 
-        let meshUserData = this.viewer.GetMeshUserDataUnderMouse (mouseCoordinates);
+        let meshUserData = this.viewer.GetMeshUserDataUnderMouse (IntersectionMode.MeshAndLine, mouseCoordinates);
         if (meshUserData === null) {
             this.navigator.SetSelection (null);
         } else {
-            this.navigator.SetSelection (new Selection (SelectionType.Mesh, meshUserData.originalMeshId));
+            this.navigator.SetSelection (new Selection (SelectionType.Mesh, meshUserData.originalMeshInstance.id));
         }
     }
 
@@ -324,11 +331,11 @@ export class Website
 
     OnModelContextMenu (globalMouseCoordinates, mouseCoordinates)
     {
-        let meshUserData = this.viewer.GetMeshUserDataUnderMouse (mouseCoordinates);
+        let meshUserData = this.viewer.GetMeshUserDataUnderMouse (IntersectionMode.MeshAndLine, mouseCoordinates);
         let items = [];
         if (meshUserData === null) {
             items.push ({
-                name : 'Fit model to window',
+                name : Loc ('Fit model to window'),
                 icon : 'fit',
                 onClick : () => {
                     this.FitModelToWindow (false);
@@ -336,7 +343,7 @@ export class Website
             });
             if (this.navigator.HasHiddenMesh ()) {
                 items.push ({
-                    name : 'Show all meshes',
+                    name : Loc ('Show all meshes'),
                     icon : 'visible',
                     onClick : () => {
                         this.navigator.ShowAllMeshes (true);
@@ -345,29 +352,29 @@ export class Website
             }
         } else {
             items.push ({
-                name : 'Hide mesh',
+                name : Loc ('Hide mesh'),
                 icon : 'hidden',
                 onClick : () => {
-                    this.navigator.ToggleMeshVisibility (meshUserData.originalMeshId);
+                    this.navigator.ToggleMeshVisibility (meshUserData.originalMeshInstance.id);
                 }
             });
             items.push ({
-                name : 'Fit mesh to window',
+                name : Loc ('Fit mesh to window'),
                 icon : 'fit',
                 onClick : () => {
-                    this.navigator.FitMeshToWindow (meshUserData.originalMeshId);
+                    this.navigator.FitMeshToWindow (meshUserData.originalMeshInstance.id);
                 }
             });
             if (this.navigator.MeshItemCount () > 1) {
-                let isMeshIsolated = this.navigator.IsMeshIsolated (meshUserData.originalMeshId);
+                let isMeshIsolated = this.navigator.IsMeshIsolated (meshUserData.originalMeshInstance.id);
                 items.push ({
-                    name : isMeshIsolated ? 'Remove isolation' : 'Isolate mesh',
+                    name : isMeshIsolated ? Loc ('Remove isolation') : Loc ('Isolate mesh'),
                     icon : isMeshIsolated ? 'deisolate' : 'isolate',
                     onClick : () => {
                         if (isMeshIsolated) {
                             this.navigator.ShowAllMeshes (true);
                         } else {
-                            this.navigator.IsolateMesh (meshUserData.originalMeshId);
+                            this.navigator.IsolateMesh (meshUserData.originalMeshInstance.id);
                         }
                     }
                 });
@@ -393,6 +400,7 @@ export class Website
             }
             TransformFileHostUrls (urls);
             let importSettings = new ImportSettings ();
+            importSettings.defaultLineColor = this.settings.defaultLineColor;
             importSettings.defaultColor = this.settings.defaultColor;
             let defaultColor = this.hashHandler.GetDefaultColorFromHash ();
             if (defaultColor !== null) {
@@ -415,7 +423,7 @@ export class Website
     {
         let animation = !onLoad;
         let boundingSphere = this.viewer.GetBoundingSphere ((meshUserData) => {
-            return this.navigator.IsMeshVisible (meshUserData.originalMeshId);
+            return this.navigator.IsMeshVisible (meshUserData.originalMeshInstance.id);
         });
         if (onLoad) {
             this.viewer.AdjustClippingPlanesToSphere (boundingSphere);
@@ -426,7 +434,7 @@ export class Website
     FitMeshToWindow (meshInstanceId)
     {
         let boundingSphere = this.viewer.GetBoundingSphere ((meshUserData) => {
-            return meshUserData.originalMeshId.IsEqual (meshInstanceId);
+            return meshUserData.originalMeshInstance.id.IsEqual (meshInstanceId);
         });
         this.viewer.FitSphereToWindow (boundingSphere, true);
     }
@@ -438,7 +446,7 @@ export class Website
             meshInstanceIdKeys.add (meshInstanceId.GetKey ());
         }
         let boundingSphere = this.viewer.GetBoundingSphere ((meshUserData) => {
-            return meshInstanceIdKeys.has (meshUserData.originalMeshId.GetKey ());
+            return meshInstanceIdKeys.has (meshUserData.originalMeshInstance.id.GetKey ());
         });
         this.viewer.FitSphereToWindow (boundingSphere, true);
     }
@@ -446,7 +454,7 @@ export class Website
     UpdateMeshesVisibility ()
     {
         this.viewer.SetMeshesVisibility ((meshUserData) => {
-            return this.navigator.IsMeshVisible (meshUserData.originalMeshId);
+            return this.navigator.IsMeshVisible (meshUserData.originalMeshInstance.id);
         });
     }
 
@@ -454,7 +462,7 @@ export class Website
     {
         let selectedMeshId = this.navigator.GetSelectedMeshId ();
         this.viewer.SetMeshesHighlight (this.highlightColor, (meshUserData) => {
-            if (selectedMeshId !== null && meshUserData.originalMeshId.IsEqual (selectedMeshId)) {
+            if (selectedMeshId !== null && meshUserData.originalMeshInstance.id.IsEqual (selectedMeshId)) {
                 return true;
             }
             return false;
@@ -471,6 +479,7 @@ export class Website
     LoadModelFromFileList (files)
     {
         let importSettings = new ImportSettings ();
+        importSettings.defaultLineColor = this.settings.defaultLineColor;
         importSettings.defaultColor = this.settings.defaultColor;
         let inputFiles = InputFilesFromFileObjects (files);
         this.LoadModelFromInputFiles (inputFiles, importSettings);
@@ -560,15 +569,22 @@ export class Website
     {
         this.settings.themeId = newThemeId;
         this.themeHandler.SwitchTheme (this.settings.themeId);
-        this.settings.SaveToCookies ();
         if (resetColors) {
+            let defaultSettings = new Settings (this.settings.themeId);
+            this.settings.backgroundColor = defaultSettings.backgroundColor;
+            this.settings.defaultLineColor = defaultSettings.defaultLineColor;
+            this.settings.defaultColor = defaultSettings.defaultColor;
+            this.sidebar.UpdateControlsStatus ();
+
             this.viewer.SetBackgroundColor (this.settings.backgroundColor);
             let modelLoader = this.modelLoaderUI.GetModelLoader ();
-            if (modelLoader.GetDefaultMaterial () !== null) {
-                ReplaceDefaultMaterialColor (this.model, this.settings.defaultColor);
-                modelLoader.ReplaceDefaultMaterialColor (this.settings.defaultColor);
+            if (modelLoader.GetDefaultMaterials () !== null) {
+                ReplaceDefaultMaterialsColor (this.model, this.settings.defaultColor, this.settings.defaultLineColor);
+                modelLoader.ReplaceDefaultMaterialsColor (this.settings.defaultColor, this.settings.defaultLineColor);
             }
         }
+
+        this.settings.SaveToCookies ();
     }
 
     InitViewer ()
@@ -577,6 +593,8 @@ export class Website
         this.viewer.Init (canvas);
         this.viewer.SetEdgeSettings (this.settings.edgeSettings);
         this.viewer.SetBackgroundColor (this.settings.backgroundColor);
+        this.viewer.SetNavigationMode (this.cameraSettings.navigationMode);
+        this.viewer.SetProjectionMode (this.cameraSettings.projectionMode);
         this.UpdateEnvironmentMap ();
     }
 
@@ -636,11 +654,13 @@ export class Website
         }
 
         let importer = this.modelLoaderUI.GetImporter ();
+        let navigationModeIndex = (this.cameraSettings.navigationMode === NavigationMode.FixedUpVector ? 0 : 1);
+        let projectionModeIndex = (this.cameraSettings.projectionMode === ProjectionMode.Perspective ? 0 : 1);
 
-        AddButton (this.toolbar, 'open', 'Open from your device', [], () => {
+        AddButton (this.toolbar, 'open', Loc ('Open from your device'), [], () => {
             this.OpenFileBrowserDialog ();
         });
-        AddButton (this.toolbar, 'open_url', 'Open from url', [], () => {
+        AddButton (this.toolbar, 'open_url', Loc ('Open from url'), [], () => {
             ShowOpenUrlDialog ((urls) => {
                 if (urls.length > 0) {
                     this.hashHandler.SetModelFilesToHash (urls);
@@ -648,60 +668,64 @@ export class Website
             });
         });
         AddSeparator (this.toolbar, ['only_on_model']);
-        AddButton (this.toolbar, 'fit', 'Fit model to window', ['only_on_model'], () => {
+        AddButton (this.toolbar, 'fit', Loc ('Fit model to window'), ['only_on_model'], () => {
             this.FitModelToWindow (false);
         });
-        AddButton (this.toolbar, 'up_y', 'Set Y axis as up vector', ['only_on_model'], () => {
+        AddButton (this.toolbar, 'up_y', Loc ('Set Y axis as up vector'), ['only_on_model'], () => {
             this.viewer.SetUpVector (Direction.Y, true);
         });
-        AddButton (this.toolbar, 'up_z', 'Set Z axis as up vector', ['only_on_model'], () => {
+        AddButton (this.toolbar, 'up_z', Loc ('Set Z axis as up vector'), ['only_on_model'], () => {
             this.viewer.SetUpVector (Direction.Z, true);
         });
-        AddButton (this.toolbar, 'flip', 'Flip up vector', ['only_on_model'], () => {
+        AddButton (this.toolbar, 'flip', Loc ('Flip up vector'), ['only_on_model'], () => {
             this.viewer.FlipUpVector ();
         });
-        AddSeparator (this.toolbar, ['only_on_model']);
-        AddRadioButton (this.toolbar, ['fix_up_on', 'fix_up_off'], ['Fixed up vector', 'Free orbit'], 0, ['only_full_width', 'only_on_model'], (buttonIndex) => {
+        AddSeparator (this.toolbar, ['only_full_width', 'only_on_model']);
+        AddRadioButton (this.toolbar, ['fix_up_on', 'fix_up_off'], [Loc ('Fixed up vector'), Loc ('Free orbit')], navigationModeIndex, ['only_full_width', 'only_on_model'], (buttonIndex) => {
             if (buttonIndex === 0) {
-                this.viewer.SetFixUpVector (true);
+                this.cameraSettings.navigationMode = NavigationMode.FixedUpVector;
             } else if (buttonIndex === 1) {
-                this.viewer.SetFixUpVector (false);
+                this.cameraSettings.navigationMode = NavigationMode.FreeOrbit;
             }
+            this.cameraSettings.SaveToCookies ();
+            this.viewer.SetNavigationMode (this.cameraSettings.navigationMode);
         });
         AddSeparator (this.toolbar, ['only_full_width', 'only_on_model']);
-        AddRadioButton (this.toolbar, ['camera_perspective', 'camera_orthographic'], ['Perspective camera', 'Orthographic camera'], 0, ['only_on_model'], (buttonIndex) => {
+        AddRadioButton (this.toolbar, ['camera_perspective', 'camera_orthographic'], [Loc ('Perspective camera'), Loc ('Orthographic camera')], projectionModeIndex, ['only_full_width', 'only_on_model'], (buttonIndex) => {
             if (buttonIndex === 0) {
-                this.viewer.SetCameraMode (CameraMode.Perspective);
+                this.cameraSettings.projectionMode = ProjectionMode.Perspective;
             } else if (buttonIndex === 1) {
-                this.viewer.SetCameraMode (CameraMode.Orthographic);
+                this.cameraSettings.projectionMode = ProjectionMode.Orthographic;
             }
+            this.cameraSettings.SaveToCookies ();
+            this.viewer.SetProjectionMode (this.cameraSettings.projectionMode);
             this.sidebar.UpdateControlsVisibility ();
         });
         AddSeparator (this.toolbar, ['only_full_width', 'only_on_model']);
-        let measureToolButton = AddPushButton (this.toolbar, 'measure', 'Measure', ['only_full_width', 'only_on_model'], (isSelected) => {
+        let measureToolButton = AddPushButton (this.toolbar, 'measure', Loc ('Measure'), ['only_full_width', 'only_on_model'], (isSelected) => {
             HandleEvent ('measure_tool_activated', isSelected ? 'on' : 'off');
             this.navigator.SetSelection (null);
             this.measureTool.SetActive (isSelected);
         });
         this.measureTool.SetButton (measureToolButton);
         AddSeparator (this.toolbar, ['only_full_width', 'only_on_model']);
-        AddButton (this.toolbar, 'download', 'Download', ['only_full_width', 'only_on_model'], () => {
+        AddButton (this.toolbar, 'download', Loc ('Download'), ['only_full_width', 'only_on_model'], () => {
             HandleEvent ('model_downloaded', '');
             let importer = this.modelLoaderUI.GetImporter ();
             DownloadModel (importer);
         });
-        AddButton (this.toolbar, 'export', 'Export', ['only_full_width', 'only_on_model'], () => {
+        AddButton (this.toolbar, 'export', Loc ('Export'), ['only_full_width', 'only_on_model'], () => {
             ShowExportDialog (this.model, this.viewer, {
                 isMeshVisible : (meshInstanceId) => {
                     return this.navigator.IsMeshVisible (meshInstanceId);
                 }
             });
         });
-        AddButton (this.toolbar, 'share', 'Share', ['only_full_width', 'only_on_model'], () => {
+        AddButton (this.toolbar, 'share', Loc ('Share'), ['only_full_width', 'only_on_model'], () => {
             ShowSharingDialog (importer.GetFileList (), this.settings, this.viewer);
         });
         AddSeparator (this.toolbar, ['only_full_width', 'only_on_model']);
-        AddButton (this.toolbar, 'snapshot', 'Create snapshot', ['only_full_width', 'only_on_model'], () => {
+        AddButton (this.toolbar, 'snapshot', Loc ('Create snapshot'), ['only_full_width', 'only_on_model'], () => {
             ShowSnapshotDialog (this.viewer);
         });
 
@@ -717,6 +741,17 @@ export class Website
                     return this.model;
                 }
             });
+        });
+
+        let selectedTheme = (this.settings.themeId === Theme.Light ? 1 : 0);
+        AddRadioButton (this.toolbar, ['dark_mode', 'light_mode'], [Loc ('Dark mode'), Loc ('Light mode')], selectedTheme, ['align_right'], (buttonIndex) => {
+            if (buttonIndex === 0) {
+                this.settings.themeId = Theme.Dark;
+            } else if (buttonIndex === 1) {
+                this.settings.themeId = Theme.Light;
+            }
+            HandleEvent ('theme_changed', this.settings.themeId === Theme.Light ? 'light' : 'dark');
+            this.SwitchTheme (this.settings.themeId, true);
         });
 
         this.parameters.fileInput.addEventListener ('change', (ev) => {
@@ -757,11 +792,11 @@ export class Website
             getShadingType : () => {
                 return this.viewer.GetShadingType ();
             },
-            getCameraMode : () => {
-                return this.viewer.GetCameraMode ();
+            getProjectionMode : () => {
+                return this.viewer.GetProjectionMode ();
             },
-            hasDefaultMaterial : () => {
-                return HasDefaultMaterial (this.model);
+            getDefaultMaterials : () => {
+                return GetDefaultMaterials (this.model);
             },
             onEnvironmentMapChanged : () => {
                 this.settings.SaveToCookies ();
@@ -780,19 +815,15 @@ export class Website
             onDefaultColorChanged : () => {
                 this.settings.SaveToCookies ();
                 let modelLoader = this.modelLoaderUI.GetModelLoader ();
-                if (modelLoader.GetDefaultMaterial () !== null) {
-                    ReplaceDefaultMaterialColor (this.model, this.settings.defaultColor);
-                    modelLoader.ReplaceDefaultMaterialColor (this.settings.defaultColor);
+                if (modelLoader.GetDefaultMaterials () !== null) {
+                    ReplaceDefaultMaterialsColor (this.model, this.settings.defaultColor, this.settings.defaultLineColor);
+                    modelLoader.ReplaceDefaultMaterialsColor (this.settings.defaultColor, this.settings.defaultLineColor);
                 }
                 this.viewer.Render ();
             },
             onEdgeDisplayChanged : () => {
                 HandleEvent ('edge_display_changed', this.settings.showEdges ? 'on' : 'off');
                 this.UpdateEdgeDisplay ();
-            },
-            onThemeChanged : () => {
-                HandleEvent ('theme_changed', this.settings.themeId === Theme.Light ? 'light' : 'dark');
-                this.SwitchTheme (this.settings.themeId, true);
             },
             onResizeRequested : () => {
                 this.layouter.Resize ();
@@ -806,27 +837,23 @@ export class Website
 
     InitNavigator ()
     {
-        function GetMeshUserData (viewer, meshInstanceId)
+        function GetMeshUserDataArray (viewer, meshInstanceId)
         {
-            let userData = null;
-            viewer.EnumerateMeshesUserData ((meshUserData) => {
-                if (meshUserData.originalMeshId.IsEqual (meshInstanceId)) {
-                    userData = meshUserData;
+            let userDataArr = [];
+            viewer.EnumerateMeshesAndLinesUserData ((meshUserData) => {
+                if (meshUserData.originalMeshInstance.id.IsEqual (meshInstanceId)) {
+                    userDataArr.push (meshUserData);
                 }
             });
-            return userData;
+            return userDataArr;
         }
 
-        function GetMeshesForMaterial (viewer, model, materialIndex)
+        function GetMeshesForMaterial (viewer, materialIndex)
         {
             let usedByMeshes = [];
-            viewer.EnumerateMeshesUserData ((meshUserData) => {
+            viewer.EnumerateMeshesAndLinesUserData ((meshUserData) => {
                 if (materialIndex === null || meshUserData.originalMaterials.indexOf (materialIndex) !== -1) {
-                    const mesh = model.GetMesh (meshUserData.originalMeshId.meshIndex);
-                    usedByMeshes.push ({
-                        meshId : meshUserData.originalMeshId,
-                        name : mesh.GetName ()
-                    });
+                    usedByMeshes.push (meshUserData.originalMeshInstance);
                 }
             });
             return usedByMeshes;
@@ -850,10 +877,16 @@ export class Website
                     usedMaterials.push (GetMaterialReferenceInfo (model, materialIndex));
                 }
             } else {
-                let userData = GetMeshUserData (viewer, meshInstanceId);
-                for (let i = 0; i < userData.originalMaterials.length; i++) {
-                    const materialIndex = userData.originalMaterials[i];
-                    usedMaterials.push (GetMaterialReferenceInfo (model, materialIndex));
+                let userDataArr = GetMeshUserDataArray (viewer, meshInstanceId);
+                let addedMaterialIndices = new Set ();
+                for (let userData of userDataArr) {
+                    for (let materialIndex of userData.originalMaterials) {
+                        if (addedMaterialIndices.has (materialIndex)) {
+                            continue;
+                        }
+                        usedMaterials.push (GetMaterialReferenceInfo (model, materialIndex));
+                        addedMaterialIndices.add (materialIndex);
+                    }
                 }
             }
             usedMaterials.sort ((a, b) => {
@@ -873,7 +906,7 @@ export class Website
                 this.FitMeshesToWindow (meshInstanceIdSet);
             },
             getMeshesForMaterial : (materialIndex) => {
-                return GetMeshesForMaterial (this.viewer, this.model, materialIndex);
+                return GetMeshesForMaterial (this.viewer, materialIndex);
             },
             getMaterialsForMesh : (meshInstanceId) => {
                 return GetMaterialsForMesh (this.viewer, this.model, meshInstanceId);
@@ -885,11 +918,11 @@ export class Website
                 this.UpdateMeshesSelection ();
             },
             onSelectionCleared : () => {
-                this.sidebar.AddObject3DProperties (this.model);
+                this.sidebar.AddObject3DProperties (this.model, this.model);
             },
             onMeshSelected : (meshInstanceId) => {
                 let meshInstance = this.model.GetMeshInstance (meshInstanceId);
-                this.sidebar.AddObject3DProperties (meshInstance);
+                this.sidebar.AddObject3DProperties (this.model, meshInstance);
             },
             onMaterialSelected : (materialIndex) => {
                 this.sidebar.AddMaterialProperties (this.model.GetMaterial (materialIndex));
@@ -931,10 +964,10 @@ export class Website
             return;
         }
 
-        let text = 'This website uses cookies to offer you better user experience. See the details at the <a target="_blank" href="info/cookies.html">Cookies Policy</a> page.';
+        let text = Loc ('This website uses cookies to offer you better user experience. See the details at the <a target="_blank" href="info/cookies.html">Cookies Policy</a> page.');
         let popupDiv = AddDiv (document.body, 'ov_bottom_floating_panel');
         AddDiv (popupDiv, 'ov_floating_panel_text', text);
-        let acceptButton = AddDiv (popupDiv, 'ov_button ov_floating_panel_button', 'Accept');
+        let acceptButton = AddDiv (popupDiv, 'ov_button ov_floating_panel_button', Loc ('Accept'));
         acceptButton.addEventListener ('click', () => {
             CookieSetBoolVal ('ov_cookie_consent', true);
             popupDiv.remove ();
